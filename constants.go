@@ -63,15 +63,23 @@ const (
 
 // WebSocket defaults
 const (
-	DefaultWSReadBufferSize  = 1024
-	DefaultWSWriteBufferSize = 1024
-	DefaultWSPingInterval    = 30 * time.Second
-	DefaultWSPongTimeout     = 60 * time.Second
-	DefaultWSWriteTimeout    = 10 * time.Second
+	DefaultWSReadBufferSize   = 1024
+	DefaultWSWriteBufferSize  = 1024
+	DefaultWSPingInterval     = 30 * time.Second
+	DefaultWSPongTimeout      = 60 * time.Second
+	DefaultWSWriteTimeout     = 10 * time.Second
+	DefaultWSReadTimeout      = 60 * time.Second
+	DefaultWSHandshakeTimeout = 10 * time.Second
 )
 
 // SSE defaults
 const (
 	DefaultSSERetryInterval     = 3000 // milliseconds
 	DefaultSSEKeepAliveInterval = 30 * time.Second
+	DefaultSSEWriteTimeout      = 10 * time.Second
+)
+
+// Hub shutdown defaults
+const (
+	DefaultHubShutdownTimeout = 30 * time.Second
 )

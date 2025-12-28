@@ -23,7 +23,9 @@ type WSConfig struct {
 	PingInterval      time.Duration              // Ping interval (default: 30s)
 	PongTimeout       time.Duration              // Pong timeout (default: 60s)
 	WriteTimeout      time.Duration              // Write timeout (default: 10s)
+	ReadTimeout       time.Duration              // Read timeout (default: 60s)
 	MaxMessageSize    int64                      // Max message size (default: 512KB)
+	HandshakeTimeout  time.Duration              // Handshake timeout (default: 10s)
 }
 
 // DefaultWSConfig returns default WebSocket configuration
@@ -36,7 +38,9 @@ func DefaultWSConfig() *WSConfig {
 		PingInterval:      DefaultWSPingInterval,
 		PongTimeout:       DefaultWSPongTimeout,
 		WriteTimeout:      DefaultWSWriteTimeout,
+		ReadTimeout:       DefaultWSReadTimeout,
 		MaxMessageSize:    DefaultMaxMessageSize,
+		HandshakeTimeout:  DefaultWSHandshakeTimeout,
 	}
 }
 
@@ -132,20 +136,24 @@ func (c *WSConn) readPump(handler WSMessageHandler) {
 	}()
 
 	c.conn.SetReadLimit(c.config.MaxMessageSize)
-	c.conn.SetReadDeadline(time.Now().Add(c.config.PongTimeout))
+	c.conn.SetReadDeadline(time.Now().Add(c.config.ReadTimeout))
 	c.conn.SetPongHandler(func(string) error {
-		c.conn.SetReadDeadline(time.Now().Add(c.config.PongTimeout))
+		// Reset read deadline on pong received
+		c.conn.SetReadDeadline(time.Now().Add(c.config.ReadTimeout))
 		return nil
 	})
 
 	for {
 		messageType, message, err := c.conn.ReadMessage()
 		if err != nil {
-			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
+			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure, websocket.CloseNormalClosure) {
 				log.Printf("WebSocket error: %v", err)
 			}
 			break
 		}
+
+		// Reset read deadline after each message
+		c.conn.SetReadDeadline(time.Now().Add(c.config.ReadTimeout))
 
 		if handler != nil {
 			handler(c, messageType, message)
@@ -212,8 +220,13 @@ func NewWSHub() *WSHub {
 // Run starts the hub's main event loop
 func (h *WSHub) Run() {
 	h.setRunning(true)
-	for h.isRunning() {
+	defer h.markDone()
+
+	for {
 		select {
+		case <-h.shutdownChan():
+			h.closeAllConnections()
+			return
 		case conn := <-h.register:
 			h.registerConn(conn)
 		case conn := <-h.unregister:
@@ -224,9 +237,26 @@ func (h *WSHub) Run() {
 	}
 }
 
-// Stop stops the hub
+// Stop stops the hub (deprecated, use Shutdown for graceful shutdown)
 func (h *WSHub) Stop() {
 	h.setRunning(false)
+}
+
+// closeAllConnections closes all WebSocket connections gracefully
+func (h *WSHub) closeAllConnections() {
+	h.connMu.Lock()
+	defer h.connMu.Unlock()
+
+	for conn := range h.connections {
+		// Send close message before closing
+		conn.conn.WriteMessage(
+			websocket.CloseMessage,
+			websocket.FormatCloseMessage(websocket.CloseGoingAway, "server shutdown"),
+		)
+		conn.Close()
+		delete(h.connections, conn)
+		delete(h.connIndex, conn.id)
+	}
 }
 
 // --- Internal helpers (KISS: small focused functions) ---
@@ -398,5 +428,6 @@ func createUpgrader(cfg *WSConfig) websocket.Upgrader {
 		WriteBufferSize:   cfg.WriteBufferSize,
 		EnableCompression: cfg.EnableCompression,
 		CheckOrigin:       cfg.CheckOrigin,
+		HandshakeTimeout:  cfg.HandshakeTimeout,
 	}
 }

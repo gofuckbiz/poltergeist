@@ -17,6 +17,7 @@ type SSEConfig struct {
 	RetryInterval     int           // Retry interval for client reconnection (ms)
 	KeepAliveInterval time.Duration // Keep-alive interval
 	BufferSize        int           // Buffer size for events
+	WriteTimeout      time.Duration // Write timeout (default: 10s)
 }
 
 // DefaultSSEConfig returns default SSE configuration
@@ -25,6 +26,7 @@ func DefaultSSEConfig() *SSEConfig {
 		RetryInterval:     DefaultSSERetryInterval,
 		KeepAliveInterval: DefaultSSEKeepAliveInterval,
 		BufferSize:        DefaultBufferSize,
+		WriteTimeout:      DefaultSSEWriteTimeout,
 	}
 }
 
@@ -46,14 +48,15 @@ type SSEEvent struct {
 
 // SSEWriter handles Server-Sent Events streaming
 type SSEWriter struct {
-	w        http.ResponseWriter
-	flusher  http.Flusher
-	config   *SSEConfig
-	closed   bool
-	closeMu  sync.Mutex
-	pipeline *EventPipeline
-	ctx      *Context
-	id       string // Unique writer ID for room management
+	w           http.ResponseWriter
+	flusher     http.Flusher
+	config      *SSEConfig
+	closed      bool
+	closeMu     sync.Mutex
+	pipeline    *EventPipeline
+	ctx         *Context
+	id          string // Unique writer ID for room management
+	lastEventID string // Last event ID for reconnection support
 }
 
 // newSSEWriter creates a new SSE writer
@@ -76,14 +79,32 @@ func newSSEWriter(w http.ResponseWriter, config *SSEConfig, pipeline *EventPipel
 		flusher.Flush()
 	}
 
+	// Get Last-Event-ID for reconnection support
+	lastEventID := ""
+	if ctx != nil && ctx.Request != nil {
+		lastEventID = ctx.Request.Header.Get("Last-Event-ID")
+	}
+
 	return &SSEWriter{
-		w:        w,
-		flusher:  flusher,
-		config:   config,
-		pipeline: pipeline,
-		ctx:      ctx,
-		id:       generateConnID(),
+		w:           w,
+		flusher:     flusher,
+		config:      config,
+		pipeline:    pipeline,
+		ctx:         ctx,
+		id:          generateConnID(),
+		lastEventID: lastEventID,
 	}, nil
+}
+
+// LastEventID returns the Last-Event-ID sent by client on reconnection
+// This allows resuming from where the client left off
+func (s *SSEWriter) LastEventID() string {
+	return s.lastEventID
+}
+
+// IsReconnect returns true if this is a reconnection (has Last-Event-ID)
+func (s *SSEWriter) IsReconnect() bool {
+	return s.lastEventID != ""
 }
 
 // --- Send Methods ---
@@ -224,8 +245,13 @@ func NewSSEHub() *SSEHub {
 // Run starts the hub's main event loop
 func (h *SSEHub) Run() {
 	h.setRunning(true)
-	for h.isRunning() {
+	defer h.markDone()
+
+	for {
 		select {
+		case <-h.shutdownChan():
+			h.closeAllClients()
+			return
 		case client := <-h.register:
 			h.registerClient(client)
 		case client := <-h.unregister:
@@ -236,9 +262,26 @@ func (h *SSEHub) Run() {
 	}
 }
 
-// Stop stops the hub
+// Stop stops the hub (deprecated, use Shutdown for graceful shutdown)
 func (h *SSEHub) Stop() {
 	h.setRunning(false)
+}
+
+// closeAllClients closes all SSE clients gracefully
+func (h *SSEHub) closeAllClients() {
+	h.clientMu.Lock()
+	defer h.clientMu.Unlock()
+
+	for client := range h.clients {
+		// Send goodbye event before closing
+		client.Send(&SSEEvent{
+			Event: "shutdown",
+			Data:  "server shutting down",
+		})
+		client.Close()
+		delete(h.clients, client)
+		delete(h.clientIndex, client.id)
+	}
 }
 
 // --- Internal helpers (KISS) ---

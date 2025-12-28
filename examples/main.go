@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"log"
 	"time"
 
@@ -334,18 +333,4 @@ func setupSSE(app *poltergeist.Server) {
 			"receivers": sseHub.ClientCount(),
 		})
 	}).Name("Trigger SSE Event").Desc("Send an event to all SSE clients").Tag("SSE")
-}
-
-// Example of using Poltergeist in a simple way
-func simpleExample() {
-	app := poltergeist.New()
-
-	app.GET("/hello", func(c *poltergeist.Context) error {
-		name := c.QueryDefault("name", "World")
-		return c.JSON(200, poltergeist.H{
-			"message": fmt.Sprintf("Hello, %s!", name),
-		})
-	})
-
-	app.Run(":3000")
 }

@@ -1,6 +1,10 @@
 package poltergeist
 
-import "sync"
+import (
+	"context"
+	"sync"
+	"time"
+)
 
 // =============================================================================
 // BASE HUB - Common functionality for WebSocket and SSE hubs (DRY)
@@ -9,16 +13,51 @@ import "sync"
 // BaseHub provides common hub functionality for managing connections and rooms
 // This implements the DRY principle by extracting shared code
 type BaseHub struct {
-	mu      sync.RWMutex
-	rooms   map[string]map[string]bool // room -> set of client IDs
-	running bool
+	mu       sync.RWMutex
+	rooms    map[string]map[string]bool // room -> set of client IDs
+	running  bool
+	shutdown chan struct{} // Graceful shutdown signal
+	done     chan struct{} // Shutdown complete signal
 }
 
 // newBaseHub creates a new BaseHub
 func newBaseHub() *BaseHub {
 	return &BaseHub{
-		rooms: make(map[string]map[string]bool),
+		rooms:    make(map[string]map[string]bool),
+		shutdown: make(chan struct{}),
+		done:     make(chan struct{}),
 	}
+}
+
+// Shutdown gracefully shuts down the hub
+func (h *BaseHub) Shutdown(ctx context.Context) error {
+	h.setRunning(false)
+	close(h.shutdown)
+
+	// Wait for done or context timeout
+	select {
+	case <-h.done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// ShutdownWithTimeout gracefully shuts down the hub with timeout
+func (h *BaseHub) ShutdownWithTimeout(timeout time.Duration) error {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	return h.Shutdown(ctx)
+}
+
+// shutdownChan returns the shutdown channel for select statements
+func (h *BaseHub) shutdownChan() <-chan struct{} {
+	return h.shutdown
+}
+
+// markDone signals that shutdown is complete
+func (h *BaseHub) markDone() {
+	close(h.done)
 }
 
 // addToRoom adds a client to a room
@@ -84,13 +123,6 @@ func (h *BaseHub) roomCount(room string) int {
 		return len(clients)
 	}
 	return 0
-}
-
-// isRunning returns whether the hub is running
-func (h *BaseHub) isRunning() bool {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
-	return h.running
 }
 
 // setRunning sets the running state
