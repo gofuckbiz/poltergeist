@@ -1,8 +1,10 @@
-<p align="center">
-  <img src="https://raw.githubusercontent.com/poltergeist-framework/poltergeist/main/assets/logo.png" alt="Poltergeist Logo" width="200">
-</p>
-
-<h1 align="center">👻 Poltergeist</h1>
+<h1 align="center">
+  <br>
+  <span style="font-size: 80px;">👻</span>
+  <br>
+  Poltergeist
+  <br>
+</h1>
 
 <p align="center">
   <strong>High-performance Realtime & REST Go Framework</strong>
@@ -406,6 +408,28 @@ go run main.go
 | [WebSocket Chat](examples/main.go#L130) | Real-time chat with rooms |
 | [SSE Events](examples/main.go#L150) | Server-sent events streaming |
 | [Swagger Docs](examples/main.go#L160) | Auto-generated API documentation |
+
+---
+
+## ⚡ Benchmarks
+
+Performance on AMD Ryzen 5 3600 (Windows, Go 1.22):
+
+| Benchmark | Operations/sec | Time/op | Allocs/op |
+|-----------|---------------|---------|-----------|
+| **Static Route** | 1,318,196 | 961 ns | 13 |
+| **Param Route** | 854,396 | 1,209 ns | 16 |
+| **Full JSON Response** | 430,201 | 2,928 ns | 33 |
+| **String Response** | 1,270,788 | 884 ns | 13 |
+| **Path Matching (static)** | 28,118,124 | 44 ns | 1 |
+| **Event Pipeline Emit** | 100,000,000 | 11.5 ns | 0 |
+| **Context Get/Set** | 34,153,198 | 35 ns | 0 |
+
+Run benchmarks yourself:
+
+```bash
+go test -run=^$ -bench=Benchmark -benchmem
+```
 
 ---
 
